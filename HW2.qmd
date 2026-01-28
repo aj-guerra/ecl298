@@ -3,6 +3,7 @@ title: "HW 2 EDA"
 name: "Aaron Guerra"
 format: 
   html:
+    embed-resources: true
     warning: false
 ---
 
