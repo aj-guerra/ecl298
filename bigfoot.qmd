@@ -1,0 +1,189 @@
+---
+title: "Bigfoot"
+author: "Aaron Guerra"
+format: 
+  html:
+    embed-resources: true
+    warning: false
+---
+
+```{r}
+if (!require("rspat")) remotes::install_github("rspatial/rspat")
+## Loading required package: rspat
+## Loading required package: terra
+## terra 1.8.97
+if (!require("predicts")) install.packages("predicts")
+## Loading required package: predicts
+if (!require("geodata")) install.packages("geodata")
+
+library(terra)
+library(rspat)
+bf <- spat_data("bigfoot")
+dim(bf)
+
+head(bf)
+```
+
+```{r}
+plot(bf[,1:2], cex=0.5, col="red")
+library(geodata)
+wrld <- geodata::world(path=".")
+bnds <- wrld[wrld$NAME_0 %in% c("Canada", "Mexico", "United States"), ]
+lines(bnds)
+```
+
+```{r}
+wc <- geodata::worldclim_global("bio", res=10, ".")
+plot(wc[[c(1, 12)]], nr=2)
+
+bfc <- extract(wc, bf[,1:2])
+head(bfc, 3)
+```
+
+```{r}
+bfc <- bfc[,-1]
+plot(bfc[ ,"wc2.1_10m_bio_1"], bfc[, "wc2.1_10m_bio_12"], col="red",
+        xlab="Annual mean temperature (°C)", ylab="Annual precipitation (mm)")
+```
+
+```{r}
+ext_bf <- ext(vect(bf[, 1:2])) + 1
+ext_bf
+set.seed(0)
+window(wc) <- ext_bf
+bg <- spatSample(wc, 5000, "random", na.rm=TRUE, xy=TRUE)
+head(bg)
+plot(bg[, c("x", "y")])
+```
+
+```{r}
+bg <- bg[, -c(1:2)]
+plot(bg[,1], bg[,12], xlab="Annual mean temperature (°C)",
+          ylab="Annual precipitation (mm)", cex=.8)
+points(bfc[,1], bfc[,12], col="red", cex=.6, pch="+")
+legend("topleft", c("observed", "background"), col=c("red", "black"), pch=c("+", "o"), pt.cex=c(.6, .8))
+```
+
+```{r}
+#eastern points
+bfe <- bfc[bf[,1] > -102, ]
+#western points
+bfw <- bfc[bf[,1] <= -102, ]
+dw <- rbind(cbind(pa=1, bfw), cbind(pa=0, bg))
+de <- rbind(cbind(pa=1, bfe), cbind(pa=0, bg))
+dw <- data.frame(dw)
+de <- data.frame(na.omit(de))
+
+library(rpart)
+cart <- rpart(pa~., data=dw)
+printcp(cart)
+plotcp(cart)
+
+```
+
+```{r}
+cart <- rpart(pa~., data=dw, cp=0.02)
+library(rpart.plot)
+rpart.plot(cart, uniform=TRUE, main="Regression Tree")
+
+```
+
+Question 1: What are the environmental conditions that Bigfoot appears to enjoy most?
+
+The conditions that bigfoot likes most are lots of precipitation during the coldest quarter but little precipitation during the driest month.
+
+```{r}
+x <- predict(wc, cart)
+x <- mask(x, wc[[1]])
+x <- round(x, 2)
+plot(x, type="class", plg=list(x="bottomleft"))
+
+set.seed(123)
+i <- sample(nrow(dw), 0.2 * nrow(dw))
+test <- dw[i,]
+train <- dw[-i,]
+
+fpa <- as.factor(train[, 'pa'])
+
+library(randomForest)
+## randomForest 4.7-1.2
+## Type rfNews() to see new features/changes/bug fixes.
+crf <- randomForest(train[, 2:ncol(train)], fpa)
+crf
+varImpPlot(crf)
+trf <- tuneRF(train[, 2:ncol(train)], train[, "pa"])
+mt <- trf[which.min(trf[,2]), 1]
+mt
+```
+
+Question 2: What did tuneRF help us find? What does the values of mt represent?
+
+tuneRF allows us to find the optival value for mtry, which is the number of variables randomly sampled to use as predictors at each split.
+
+The variable mt is the number of variables to use at each split that minimizes out-of-bag-error. Interestingly, when I run it I get 6 instead of 12 as in the textbook.
+
+```{r}
+rrf <- randomForest(train[, 2:ncol(train)], train[, "pa"], mtry=mt, ntree=250)
+rrf
+plot(rrf)
+```
+
+Question 3: What does `plot(rrf)` show us?
+
+The plot shows us how out of bag error rates decrease as the number of trees are increased. In this case, after about 50 trees the error rates stabilizes, so there is no need to go beyond that.
+
+```{r}
+rp <- predict(wc, rrf, na.rm=TRUE)
+plot(rp)
+```
+
+```{r}
+library(predicts)
+eva <- pa_evaluate(predict(rrf, test[test$pa==1, ]), predict(rrf, test[test$pa==0, ]))
+eva
+plot(eva, "ROC")
+```
+
+```{r}
+par(mfrow=c(1,2))
+plot(eva, "boxplot")
+plot(eva, "density")
+tr <- eva@thresholds
+tr
+plot(rp > tr$max_spec_sens)
+
+```
+
+```{r}
+rc <- predict(wc, crf, na.rm=TRUE)
+plot(rc)
+rc2 <- predict(wc, crf, type="prob", na.rm=TRUE)
+plot(rc2, 2)
+```
+
+```{r}
+eva2 <- pa_evaluate(predict(rrf, de[de$pa==1, ]), predict(rrf, de[de$pa==0, ]))
+eva2
+par(mfrow=c(1,2))
+plot(eva2, "ROC")
+plot(eva2, "boxplot")
+```
+
+```{r}
+plot(rc)
+points(bf[,1:2], cex=.15)
+```
+
+Question 4: Why would it be that the model does not extrapolate well?
+
+The model does not extrapolate well because the environmental conditions in the eastern US are different from those in the western US and the eastern bigfoot may prefer different environmental conditions to the western bigfoot. Whatever the conditions that the eastern bigfoot prefers, they are not in the training data.
+
+```{r}
+window(wc) <- NULL
+pm <- predict(wc, rrf, na.rm=TRUE)
+plet(pm)
+```
+
+Question 5: What are some countries that should consider Bigfoot as a potential invasive species?
+
+Portugal, Spain, Chile, and Turkey are all good candidates for bigfoot's next vacation, with potential for Northern China, Mongolia, Morrocco, France, and Greece
