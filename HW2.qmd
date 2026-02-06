@@ -17,7 +17,7 @@ library(tidyverse)
 # download data from Bay Adapt Github
 url <- "https://github.com/BCDC-GIS/Bay-Adapt-Currents/blob/e8e4ec0ad1ee6888070975a138a3d7d075c1a40f/Sea%20Level%20Rise%20in%20General%20Plans/Cities.xlsx?raw=true"
 
-download.file(url, destfile = "data/Cities_Simplified.xlsx")
+# download.file(url, destfile = "data/Cities_Simplified.xlsx")
 
 cities_data <- read_excel("data/Cities_Simplified.xlsx")[,1:41]
 
@@ -80,13 +80,16 @@ cd_cities_plot <- count(cities_data, city) |>
   arrange(desc(n)) 
 
 # plot
-ggplot(cd_cities_plot, aes(x = reorder(city, n), y = n)) +
+policies_per_city <- ggplot(cd_cities_plot, aes(x = reorder(city, n), y = n)) +
   geom_bar(stat = "identity", fill = "steelblue") +
   coord_flip() +
   labs(title = "Policies per City ",
        x = "City",
        y = "Number of Policies") +
   theme_minimal()
+
+#save as 6 by 10 in image
+ggsave("images/policies_per_city.png", bg='white', width = 6, height = 10)
 ```
 
 
