@@ -1,0 +1,190 @@
+---
+title: "Final Project"
+author: "Aaron Guerra"
+format: html
+---
+
+The goal of this project is to compare supervised and unsupervised methods for topic modelling using the existing manual codes as gold standard data. To do supervised topic modelling, I train a random forest classifier to predict if a certain topic is being discussed in a policy based on the text of that policy. To do unsupervised topic modelling, I use LDA to identify clusters of words that are commonly used together across policies, and then I interpret those clusters as topics.
+
+# From Homework 1
+
+First, I load in the data directly from the github repo where it is stored and do some initial cleaning so that I can better look at the topics of interest. To start, I plot the number of policies per city and the number of times each topic is considered across all cities.
+
+```{r}
+
+library(readxl)
+library(tidyverse)
+library(quanteda)
+library(randomForest)
+
+# download data from Bay Adapt Github
+url <- "https://github.com/BCDC-GIS/Bay-Adapt-Currents/blob/e8e4ec0ad1ee6888070975a138a3d7d075c1a40f/Sea%20Level%20Rise%20in%20General%20Plans/Cities.xlsx?raw=true"
+
+# download.file(url, destfile = "data/Cities_Simplified.xlsx")
+
+cities_data <- read_excel("data/Cities_Simplified.xlsx")[,1:41]
+
+colnames(cities_data) <- c(
+  'city', 'county', 'doc_type', 'year', 'element', 'policy', 'program', 'text',
+  'aff_housing', 'beach', 'building_code', 'community_engage', 'contamination',
+  'coordination', 'cult_hist_pres', 'development', 'econ_jobs', 'education_outreach',
+  'emergency', 'erosion', 'expenditures', 'funding', 'planning', 'habitat_env_qual',
+  'infrastructure', 'managed_retreat', 'mapping', 'levees_seawall', 'nature_based',
+  'open_space', 'public_health', 'research_monitor', 'training', 'transport_mobility',
+  'utilities', 'vulnerable_populations', 'water_quality', 'wetlands',
+  'flood_stormwater', 'groundwater', 'slr_mentioned'
+)
+
+
+# 1. Built Environment
+vars_built <- c('infrastructure', 'transport_mobility', 'utilities', 
+                'building_code', 'development', 'levees_seawall', 'flood_stormwater')
+
+# 2. Natural Resources
+vars_nature <- c('wetlands', 'nature_based', 'habitat_env_qual', 
+                 'open_space', 'beach', 'erosion', 'water_quality', 
+                 'groundwater', 'contamination')
+
+# 3. Social Equity
+vars_social <- c('vulnerable_populations', 'aff_housing', 'public_health', 
+                 'cult_hist_pres', 'econ_jobs', 'community_engage', 'education_outreach')
+
+# 4. Governance & Process
+vars_gov <- c('planning', 'coordination', 'funding', 'expenditures', 
+              'research_monitor', 'mapping', 'training', 'emergency', 'managed_retreat')
+
+cities_clean <- cities_data |>
+  mutate(across(aff_housing:slr_mentioned, 
+                ~ case_when(. == "1" ~ 1, TRUE ~ 0))) |>
+  mutate(year = as.numeric(as.character(year))) |>
+  rowwise() |>
+  mutate(
+    sys_built   = sum(c_across(all_of(vars_built))),
+    sys_nature  = sum(c_across(all_of(vars_nature))),
+    sys_social  = sum(c_across(all_of(vars_social))),
+    sys_gov     = sum(c_across(all_of(vars_gov))),
+  ) |>
+  mutate(
+    sys_built_b = as.factor(ifelse(sys_built > 0, 1, 0)),
+    sys_nature_b = as.factor(ifelse(sys_nature > 0, 1, 0)),
+    sys_social_b = as.factor(ifelse(sys_social > 0, 1, 0)),
+    sys_gov_b = as.factor(ifelse(sys_gov > 0, 1, 0))) |> 
+  ungroup() |>
+  mutate(across(aff_housing:slr_mentioned, as.factor)) |>
+  mutate(across(city:element, as.factor)) |> 
+  select(city, element, sys_built_b, sys_nature_b, sys_social_b, sys_gov_b, year, 
+         text, county, doc_type, policy, program)
+  
+
+```
+
+
+```{r}
+# cities and how many policies they have
+cd_cities_plot <- count(cities_data, city) |> 
+  arrange(desc(n)) 
+
+# plot
+policies_per_city <- ggplot(cd_cities_plot, aes(x = reorder(city, n), y = n)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  coord_flip() +
+  labs(title = "Policies per City ",
+       x = "City",
+       y = "Number of Policies") +
+  theme_minimal()
+
+#save as 6 by 10 in image
+ggsave("images/policies_per_city.png", bg='white', width = 6, height = 10)
+```
+
+
+```{r}
+# count of how many times each topic considered
+cd_topic_sums <- cities_clean |> 
+  select(sys_built_b:sys_gov_b) |> 
+  summarise(across(everything(), sum, na.rm = TRUE)) |> 
+  pivot_longer(everything(), names_to = "topic", values_to = "count") |> 
+  arrange(desc(count))
+
+# plot
+ggplot(cd_topic_sums, aes(x = reorder(topic, count), y = count)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  coord_flip() +
+  labs(title = "Count of Topics",
+       x = "Topic",
+       y = "Count") +
+  theme_minimal()
+
+
+```
+
+In this step, I try to predict if a certain policy is discussing a certain topic on the basis of the text in that policy. To do so I use `quanteda` to create a document-feature matrix from the text of each policy, such that each row is a policy and each column is a word, thus, p>>n. However, I filter to only the top 1000 words which appear in the dataset, which reduces p<n. Then I train an RF classifier to predict if a policy discusses the topic (3 are used here as examples) based on the words used in the policy. 
+
+```{r}
+
+cities_text <- cities_clean %>%
+  pull(text)
+
+slr_docvar <- cities_clean %>%
+  select(sys_built_b:sys_gov_b)
+
+# convert cities_data$text to a corpus
+cities_dfm <- corpus(cities_clean, docvars=slr_docvar) %>% 
+  tokens(remove_punct = TRUE) %>%
+  tokens_remove(stopwords("en")) %>% 
+  dfm() %>% 
+  dfm_trim(min_termfreq = 500,
+           termfreq_type = "rank")
+
+train_index <- sample(1:nrow(cities_clean), 
+                      size = 0.5 * nrow(cities_clean), 
+                      replace = FALSE)
+
+cities_dfm_train <- cities_dfm[train_index, ]
+
+dfm_df_train <- convert(cities_dfm, to='data.frame') %>% 
+  select(-doc_id) |> 
+  tibble() |> 
+  slice(train_index)
+
+built_rf <- randomForest(x = dfm_df_train, y = docvars(cities_dfm_train, "sys_built_b"), ntree = 500); built_rf
+nature_rf <- randomForest(x = dfm_df_train, y = docvars(cities_dfm_train, "sys_nature_b"), ntree = 500); nature_rf
+social_rf <- randomForest(x = dfm_df_train, y = docvars(cities_dfm_train, "sys_social_b"), ntree = 500); social_rf
+gov_rf <- randomForest(x = dfm_df_train, y = docvars(cities_dfm_train, "sys_gov_b"), ntree = 500); gov_rf
+
+varImpPlot(built_rf)
+varImpPlot(nature_rf)
+varImpPlot(social_rf)
+varImpPlot(gov_rf)
+```
+
+```{r}
+# testing on test set
+dfm_df_test <- convert(cities_dfm, to='data.frame') %>% 
+  select(-doc_id) |> 
+  tibble() |> 
+  slice(-train_index)
+
+
+cities_dfm_test <- cities_dfm[-train_index, ]
+
+
+built_pred <- predict(built_rf, newdata = dfm_df_test)
+built_score <- mean(built_pred == docvars(cities_dfm_test, "sys_built_b")); 1-built_score
+nature_pred <- predict(nature_rf, newdata = dfm_df_test)
+nature_score <- mean(nature_pred == docvars(cities_dfm_test, "sys_nature_b")); 1-nature_score
+social_pred <- predict(social_rf, newdata = dfm_df_test)
+social_score <- mean(social_pred == docvars(cities_dfm_test, "sys_social_b")); 1-social_score
+gov_pred <- predict(gov_rf, newdata = dfm_df_test)
+gov_score <- mean(gov_pred == docvars(cities_dfm_test, "sys_gov_b")); 1-gov_score
+
+
+```
+
+
+# From Other Work Done for Mark
+
+```{r}
+
+```
+

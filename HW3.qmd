@@ -17,48 +17,16 @@ library(tidyverse)
 
 cities_data <- read_excel("data/Cities_Simplified.xlsx")[,1:41]
 
-colnames(cities_data) <- c('city',
-                           'county', 
-                           'doc_type',
-                           'year',
-                           'element',
-                           'policy',
-                           'program',
-                           'text',
-                           'aff_housing',
-                           'beach',
-                           'building_code',
-                           'community_engage',
-                           'contamination',
-                           'coordination',
-                           'cult_hist_pres',
-                           'development',
-                           'econ_jobs',
-                           'education_outreach',
-                           'emergency',
-                           'erosion',
-                           'expenditures',
-                           'funding',
-                           'planning',
-                           'habitat_env_qual',
-                           'infrastructure',
-                           'managed_retreat',
-                           'mapping',
-                           'levees_seawall',
-                           'nature_based',
-                           'open_space',
-                           'public_health',
-                           'research_monitor',
-                           'training',
-                           'transport_mobility',
-                           'utilities',
-                           'vulnerable_populations',
-                           'water_quality',
-                           'wetlands',
-                           'flood_stormwater',
-                           'groundwater',
-                           'slr_mentioned'
-                           ) 
+colnames(cities_data) <- c(
+  'city', 'county', 'doc_type', 'year', 'element', 'policy', 'program', 'text',
+  'aff_housing', 'beach', 'building_code', 'community_engage', 'contamination',
+  'coordination', 'cult_hist_pres', 'development', 'econ_jobs', 'education_outreach',
+  'emergency', 'erosion', 'expenditures', 'funding', 'planning', 'habitat_env_qual',
+  'infrastructure', 'managed_retreat', 'mapping', 'levees_seawall', 'nature_based',
+  'open_space', 'public_health', 'research_monitor', 'training', 'transport_mobility',
+  'utilities', 'vulnerable_populations', 'water_quality', 'wetlands',
+  'flood_stormwater', 'groundwater', 'slr_mentioned'
+)
 
 # mutate across everything between aff_housing and slr_mentioned to be factors, converting "-" or NA to 0 and "1" to 1
 

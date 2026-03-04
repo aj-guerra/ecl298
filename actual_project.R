@@ -9,49 +9,6 @@ library(tidyverse)
 
 cities_data <- read_excel("data/Cities_Simplified.xlsx")[,1:41]
 
-colnames(cities_data) <- c('city',
-                           'county', 
-                           'doc_type',
-                           'year',
-                           'element',
-                           'policy',
-                           'program',
-                           'text',
-                           'aff_housing',
-                           'beach',
-                           'building_code',
-                           'community_engage',
-                           'contamination',
-                           'coordination',
-                           'cult_hist_pres',
-                           'development',
-                           'econ_jobs',
-                           'education_outreach',
-                           'emergency',
-                           'erosion',
-                           'expenditures',
-                           'funding',
-                           'planning',
-                           'habitat_env_qual',
-                           'infrastructure',
-                           'managed_retreat',
-                           'mapping',
-                           'levees_seawall',
-                           'nature_based',
-                           'open_space',
-                           'public_health',
-                           'research_monitor',
-                           'training',
-                           'transport_mobility',
-                           'utilities',
-                           'vulnerable_populations',
-                           'water_quality',
-                           'wetlands',
-                           'flood_stormwater',
-                           'groundwater',
-                           'slr_mentioned'
-) 
-
 colnames(cities_data) <- c(
   'city', 'county', 'doc_type', 'year', 'element', 'policy', 'program', 'text',
   'aff_housing', 'beach', 'building_code', 'community_engage', 'contamination',
@@ -203,12 +160,28 @@ ggplot(cities_agg, aes(x = log(sys_built), y = log(sys_nature))) +
   theme_light() +
   scale_color_viridis_c(option = "magma") +
   labs(
-    title = "Typologies: Hard Infrastructure vs. Nature-Based Solutions",
-    subtitle = "Size = Social Equity Focus | Color = Governance Intensity",
     x = "Built Environment Score (log Count)",
     y = "Nature-Based Score (log Count)",
     color = "Gov Score",
     size = "Social Score"
+  ) +
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "gray") # Line of equality
+
+
+ggplot(cities_agg, aes(y = (sys_social), x = (sys_gov))) +
+  geom_point(aes(size = (sys_built), color = (sys_nature)), alpha = 0.8) +
+  geom_text(aes(label = as.character(city)),
+            vjust = 2, 
+            size = 2, 
+            position='jitter',
+            check_overlap = TRUE) +
+  theme_light() +
+  scale_color_viridis_c(option = "magma") +
+  labs(
+    x = "Social Equity Score (log Count)",
+    y = "Governance Score (log Count)",
+    color = "Nature Score",
+    size = "Infrastructure Score"
   ) +
   geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "gray") # Line of equality
 
