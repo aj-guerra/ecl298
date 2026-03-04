@@ -102,6 +102,7 @@ ggsave("images/policies_per_city.png", bg='white', width = 6, height = 10)
 # count of how many times each topic considered
 cd_topic_sums <- cities_clean |> 
   select(sys_built_b:sys_gov_b) |> 
+  mutate(across(everything(), as.numeric)) |>
   summarise(across(everything(), sum, na.rm = TRUE)) |> 
   pivot_longer(everything(), names_to = "topic", values_to = "count") |> 
   arrange(desc(count))
@@ -136,8 +137,9 @@ cities_dfm <- corpus(cities_clean, docvars=slr_docvar) %>%
   dfm_trim(min_termfreq = 500,
            termfreq_type = "rank")
 
+set.seed(354651)
 train_index <- sample(1:nrow(cities_clean), 
-                      size = 0.5 * nrow(cities_clean), 
+                      size = 0.7 * nrow(cities_clean), 
                       replace = FALSE)
 
 cities_dfm_train <- cities_dfm[train_index, ]
@@ -171,20 +173,119 @@ cities_dfm_test <- cities_dfm[-train_index, ]
 
 built_pred <- predict(built_rf, newdata = dfm_df_test)
 built_score <- mean(built_pred == docvars(cities_dfm_test, "sys_built_b")); 1-built_score
+
 nature_pred <- predict(nature_rf, newdata = dfm_df_test)
 nature_score <- mean(nature_pred == docvars(cities_dfm_test, "sys_nature_b")); 1-nature_score
+
 social_pred <- predict(social_rf, newdata = dfm_df_test)
 social_score <- mean(social_pred == docvars(cities_dfm_test, "sys_social_b")); 1-social_score
+
 gov_pred <- predict(gov_rf, newdata = dfm_df_test)
 gov_score <- mean(gov_pred == docvars(cities_dfm_test, "sys_gov_b")); 1-gov_score
 
 
 ```
 
+Now to do unsupervised topic modelling, I use Seeded LDA to identify words that belong together 
 
-# From Other Work Done for Mark
+```{r}
+library(seededlda)
+
+set.seed(354651)
+lda_model <- textmodel_lda(cities_dfm_train, k=4)
+
+terms(lda_model, 10)
+
+
+```
+
+Based on this it seems like a fairly decent start. The first topic seems to look at built infrastructure, with terms like "flood", "facilities", and "development". The third topic maps fairly naturally to natural resources with terms like "shoreline", "habitat", "creek", and "natural". The thid topic seems to get at governance, with terms like "city", "mitigation", "plan", and "planning". The fourth topic sort of misses the mark, however, and does not get at social equity and seems to be a more water-focused version of built infrastructure. This is somewhat to be expected with LDA, as only four topics will be pretty coarse by nature and will not cover everything expected. There are two directions to go from here - one is to fit another completely unsupervised LDA model with more categories which we can aggregate and look through to get at a combination of topics that map to social equity.
+
+The other option is to use some of the information we have, namely, that each topic contains certain subtopics. We can use the terms in these subtopics to seed the LDA model, which will hopefully give four topics that match what we are looking for. This is a bit of a rough approach without *too* much thought, where I just take the main words from each subtopic and use them. A more complicated version would start to concatenate phrases that appear together frequently, for example, instead of "sea", "level", and "rise" being seperate tokens, we might concatenate them to "sea level rise". However, this should suffice for this project. 
 
 ```{r}
 
+# 1. Built Environment
+vars_built <- c('infrastructure', 'transport_mobility', 'utilities', 
+                'building_code', 'development', 'levees_seawall', 'flood_stormwater')
+
+# 2. Natural Resources
+vars_nature <- c('wetlands', 'nature_based', 'habitat_env_qual', 
+                 'open_space', 'beach', 'erosion', 'water_quality', 
+                 'groundwater', 'contamination')
+
+# 3. Social Equity
+vars_social <- c('vulnerable_populations', 'aff_housing', 'public_health', 
+                 'cult_hist_pres', 'econ_jobs', 'community_engage', 'education_outreach')
+
+# 4. Governance & Process
+vars_gov <- c('planning', 'coordination', 'funding', 'expenditures', 
+              'research_monitor', 'mapping', 'training', 'emergency', 'managed_retreat')
+
+seed_dict <- dictionary(list(
+  built = c('infrastructure', 'transport*', 'mobility', 'utilit*', 'building*', 
+           'development', 'levees', 'seawall', 'flood*','stormwater*'),
+  nature = c('wetland*', 'natur*', 'habitat*', 'environmental', 'quality', 
+             'space', 'beach*', 'erosion', 'groundwater', 'contamination'),
+  social = c('vulnerab*','population*', 'affordab*', 'health', 
+             'cultur*', 'histor*', 'econom*', 'job*', 'communit*', 
+             'engagement', 'education*', 'outreach'),
+  gov = c('plan*', 'coordinat*', 'fund*', 'expenditur*', 
+          'research*', 'monitor', 'map*', 'train*', 'emergenc*')
+))
+
+set.seed(354651)
+seeded_lda_model <- textmodel_seededlda(cities_dfm_train, 
+                                         dictionary=seed_dict)
+terms(seeded_lda_model, 10)
 ```
+
+So based on these four topics, it seems that the fourth topic that was previously hard to decipher is mostly mapping to the 'social equity' topic in the seeded model. The 'built' and 'nature' topics remain fairly similar, and the 'governance' topic seems to shift a little bit. There is certainly room for iterative, mostly manual improvement here, in refining the dictionary and evaluating some of these terms in context (all of which can be done in the `quanteda` package). 
+
+```{r}
+# topic 1 - infrasturcture
+# topic 2 - nature
+# topic 3 - governance
+# topic 4 - social equity
+
+pred_lda <- textmodel_lda(cities_dfm_test, 
+                             model=lda_model)
+
+built_pred_lda <- as.factor(as.numeric(topics(pred_lda) == 'topic1'))
+built_score_lda <- mean(built_pred_lda == docvars(cities_dfm_test, "sys_built_b")); 1-built_score_lda
+
+nature_pred_lda <- as.factor(as.numeric(topics(pred_lda) == 'topic2'))
+nature_score_lda <- mean(nature_pred_lda == docvars(cities_dfm_test, "sys_nature_b")); 1-nature_score_lda
+
+social_pred_lda <- as.factor(as.numeric(topics(pred_lda) == 'topic4'))
+social_score_lda <- mean(social_pred_lda == docvars(cities_dfm_test, "sys_social_b")); 1-social_score_lda
+
+gov_pred_lda <- as.factor(as.numeric(topics(pred_lda) == 'topic3'))
+gov_score_lda <- mean(gov_pred_lda == docvars(cities_dfm_test, "sys_gov_b")); 1-gov_score_lda
+
+```
+
+```{r}
+# topic 1 - infrastructure
+# topic 2 - nature
+# topic 3 - governance
+# topic 4 - social equity
+
+pred_seeded <- textmodel_lda(cities_dfm_test, 
+                             model=seeded_lda_model)
+
+built_pred_lda_seed <- as.factor(as.numeric(topics(pred_seeded) == 'built'))
+built_score_lda_seed <- mean(built_pred_lda_seed == docvars(cities_dfm_test, "sys_built_b")); 1-built_score_lda_seed
+
+nature_pred_lda_seed <- as.factor(as.numeric(topics(pred_seeded) == 'nature'))
+nature_score_lda_seed <- mean(nature_pred_lda_seed == docvars(cities_dfm_test, "sys_nature_b")); 1-nature_score_lda_seed
+
+social_pred_lda_seed <- as.factor(as.numeric(topics(pred_seeded) == 'social'))
+social_score_lda_seed <- mean(social_pred_lda_seed == docvars(cities_dfm_test, "sys_social_b")); 1-social_score_lda_seed
+
+gov_pred_lda_seed <- as.factor(as.numeric(topics(pred_seeded) == 'gov'))
+gov_score_lda_seed <- mean(gov_pred_lda_seed == docvars(cities_dfm_test, "sys_gov_b")); 1-gov_score_lda_seed
+
+```
+
 
