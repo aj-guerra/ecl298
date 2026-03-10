@@ -16,6 +16,7 @@ library(readxl)
 library(tidyverse)
 library(quanteda)
 library(randomForest)
+library(xgboost)
 
 # download data from Bay Adapt Github
 url <- "https://github.com/BCDC-GIS/Bay-Adapt-Currents/blob/e8e4ec0ad1ee6888070975a138a3d7d075c1a40f/Sea%20Level%20Rise%20in%20General%20Plans/Cities.xlsx?raw=true"
@@ -186,6 +187,75 @@ gov_score <- mean(gov_pred == docvars(cities_dfm_test, "sys_gov_b")); 1-gov_scor
 
 ```
 
+```{r}
+#xgboost version
+
+dfm_matrix_train <- as.matrix(dfm_df_train)
+dfm_label_built <- as.numeric(docvars(cities_dfm_train, "sys_built_b"))-1
+dfm_label_nature <- as.numeric(docvars(cities_dfm_train, "sys_nature_b"))-1
+dfm_label_social <- as.numeric(docvars(cities_dfm_train, "sys_social_b"))-1
+dfm_label_gov <- as.numeric(docvars(cities_dfm_train, "sys_gov_b"))-1
+
+built_xgb <- xgboost(
+  data = dfm_matrix_train,
+  label = dfm_label_built,
+  objective = "binary:logistic",
+  nrounds = 500,
+  verbose = 0
+) 
+
+nature_xgb <- xgboost(
+  data = dfm_matrix_train,
+  label = dfm_label_nature,
+  objective = "binary:logistic",
+  nrounds = 500,
+  verbose = 0
+)
+
+social_xgb <- xgboost(
+  data = dfm_matrix_train,
+  label = dfm_label_social,
+  objective = "binary:logistic",
+  nrounds = 500,
+  verbose = 0
+)
+
+gov_xgb <- xgboost(
+  data = dfm_matrix_train,
+  label = dfm_label_gov,
+  objective = "binary:logistic",
+  nrounds = 500,
+  verbose = 0
+)
+
+```
+
+```{r}
+# testing on test set
+dfm_df_test <- convert(cities_dfm, to='data.frame') %>% 
+  select(-doc_id) |> 
+  tibble() |> 
+  slice(-train_index)
+
+
+cities_dfm_test <- cities_dfm[-train_index, ]
+
+
+built_pred_xgb <- round(predict(built_xgb, newdata = as.matrix(dfm_df_test)))
+built_score_xgb <- mean(built_pred_xgb == as.numeric(docvars(cities_dfm_test, "sys_built_b"))-1); 1-built_score_xgb
+
+nature_pred <- round(predict(nature_xgb, newdata = as.matrix(dfm_df_test)))
+nature_score <- mean(nature_pred == docvars(cities_dfm_test, "sys_nature_b")); 1-nature_score
+
+social_pred <- predict(social_xgb, newdata = dfm_df_test)
+social_score <- mean(social_pred == docvars(cities_dfm_test, "sys_social_b")); 1-social_score
+
+gov_pred <- predict(gov_rf, newdata = dfm_df_test)
+gov_score <- mean(gov_pred == docvars(cities_dfm_test, "sys_gov_b")); 1-gov_score
+
+
+```
+
 Now to do unsupervised topic modelling, I use Seeded LDA to identify words that belong together 
 
 ```{r}
@@ -242,6 +312,8 @@ terms(seeded_lda_model, 10)
 
 So based on these four topics, it seems that the fourth topic that was previously hard to decipher is mostly mapping to the 'social equity' topic in the seeded model. The 'built' and 'nature' topics remain fairly similar, and the 'governance' topic seems to shift a little bit. There is certainly room for iterative, mostly manual improvement here, in refining the dictionary and evaluating some of these terms in context (all of which can be done in the `quanteda` package). 
 
+Here, I move on to predicting for the test set. One other point worth noting is that LDA technically assigned each document a probability of belonging to each topic, but for comparability with RF (which in this case is predicting a single class for each document) I assign each document to the topic with the highest probability.
+
 ```{r}
 # topic 1 - infrasturcture
 # topic 2 - nature
@@ -264,6 +336,8 @@ gov_pred_lda <- as.factor(as.numeric(topics(pred_lda) == 'topic3'))
 gov_score_lda <- mean(gov_pred_lda == docvars(cities_dfm_test, "sys_gov_b")); 1-gov_score_lda
 
 ```
+
+So these error rates are pretty poor. Two of them, built infrastrucure and governance, are as bad (well, a tiny bit worse) than random, and the other two, nature and social equity, and about double the error rate for random forests. On one hand, performance worse than random is not great, but 25-35% error rates, given that this is completely unsupervised, is arguably not that bad. I think what it indicates more than anything else is that nature and social equity terms (at least defined as the topics they are) are more distinctive and easier to pick out with LDA. 
 
 ```{r}
 # topic 1 - infrastructure
@@ -288,4 +362,4 @@ gov_score_lda_seed <- mean(gov_pred_lda_seed == docvars(cities_dfm_test, "sys_go
 
 ```
 
-
+Now with the seeded model, we see that performance improves across the board by a few percentage points. Notably, built infrastructure and governance are both performing better better than random, but not by much. Performance for nature and social also improves, for social equity in particular. However the error rates for these are still categories are still roughly double the error rates for random forests. 
